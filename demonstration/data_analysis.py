@@ -7,6 +7,8 @@ from unpack_data.victor_io_zarr import extract_episode, EpisodeData
 from scipy.spatial.transform import Rotation as R
 
 Mass = 0.0042 # kg
+G_WORLD = np.array([0.0, 0.0, -9.81])
+q0 = np.array([-0.37382076, 0.03296935, -0.02435134, -0.92659488])
 
 def get_contact_time(episode: EpisodeData, baseline_samples=50, drift_factor=0.5, threshold_factor=5.0):
     """Detect contact time using CUSUM on torque Tx."""
@@ -126,13 +128,6 @@ def compute_force(episode: EpisodeData):
     force_pred = lambda_[:, np.newaxis] * force_unit
 
 
-    plt.figure()
-    # plt.plot(episode.times, tau_tool, label=['taux', 'tauy', 'taudz'])
-    plt.plot(episode.times, v, label=['vx', 'vy', 'vz'])
-    plt.plot(episode.times, lambda_, label='lambda')
-    plt.legend()
-    plt.show()
-
     return world2tool(force_pred, quat, inverse=True), force_world
 
 # ...existing code...
@@ -170,10 +165,9 @@ def preprocess_force(episode: EpisodeData):
 
     force_sensor = episode.wrenches[:,:3]
     quat = episode.states[:, -4:]
-    force_tool = sensor2tool(force_sensor)
+
+    force_tool = gravity_compensation(force_sensor, quat, Mass, )
     force_world = world2tool(force_tool, quat, inverse=True)
-    force_world = gravity_compensation(force_world, Mass)
-    force_tool = world2tool(force_world, quat, inverse=False)
 
     return force_world
 
@@ -211,8 +205,15 @@ def world2tool(world, quat, inverse=False):
     tool = rot.apply(world, inverse=inverse)
     return tool
 
-def gravity_compensation(force, m):
-    return force + np.array([0.0, 0.0, 9.81*m])
+def gravity_compensation(force_tool, q, m, torque=False):
+    g0 = world2tool(G_WORLD, q0, inverse=False)
+    gi = world2tool(G_WORLD, q, inverse=False)
+
+    F_g = m * (gi - g0)
+    print(F_g.shape)
+    print(force_tool.shape)
+    F = force_tool - F_g
+    return F
 
 def main():
     parser = argparse.ArgumentParser(description="Analyze episode data.")

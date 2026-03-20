@@ -105,6 +105,8 @@ def main():
     # Tare episode
     _, q0 = average_static_trial(episodes[0])
 
+    print("q0: ", q0)
+
     # Gravity parameters identification
     avg_trials = []
     for episode in episodes[1:]:
