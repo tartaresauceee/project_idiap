@@ -1,0 +1,28 @@
+name: exportData
+channels:
+  - defaults
+  - conda-forge
+dependencies:
+  - python=3.12
+  - numpy
+  - scipy
+  - matplotlib
+  - pip
+  - pip:
+      - asciitree==0.3.3
+      - contourpy==1.3.3
+      - cycler==0.12.1
+      - deprecated==1.3.1
+      - fasteners==0.20
+      - fonttools==4.61.1
+      - kiwisolver==1.4.9
+      - matplotlib==3.10.8
+      - numcodecs==0.15.1
+      - numpy==2.4.2
+      - pillow==12.1.1
+      - pyparsing==3.3.2
+      - python-dateutil==2.9.0.post0
+      - scipy==1.17.1
+      - six==1.17.0
+      - wrapt==2.1.1
+      - zarr==2.18.7
