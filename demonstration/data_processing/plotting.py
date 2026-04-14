@@ -1,17 +1,10 @@
 import numpy as np
 import matplotlib.pyplot as plt
-import argparse
+import copy
 
+from unpack_data.victor_io_zarr import EpisodeData
 
-from unpack_data.victor_io_zarr import extract_episode, EpisodeData
-from scipy.spatial.transform import Rotation as R
-
-Mass = 0.0312 # kg
-G_WORLD = np.array([0.0, 0.0, -9.81])
-q0 = np.array([-0.37382076, 0.03296935, -0.02435134, -0.92659488])
-r = np.array([0.0, -0.104, 0.002325]) # vector from sensor origin to spatula tip 
-
-force_drift = []
+from physics_utils import Mass, gravity_compensation, compute_force, compute_zft, get_contact_idx_with_height
 
 def plot_episode_cal(episode: EpisodeData, index: int = 0, ax=None):
     times = episode.times - episode.times[0]
@@ -51,20 +44,6 @@ def plot_episode_cal(episode: EpisodeData, index: int = 0, ax=None):
         fig.suptitle(f"Calibration Episode {index}: Raw vs Gravity-Compensated Force", y=1.02)
         plt.tight_layout()
 
-
-def get_contact_idx_with_height(height: np.ndarray, thresh: float):
-    idx = np.where(height < thresh)[0]
-    first_idx = idx[0] if idx.size > 0 else None  # or None
-
-    return first_idx
-
-def skew(v: np.ndarray) -> np.ndarray:
-    """Skew-symmetric matrix [v]x such that [v]x u = v [cross] u."""
-    return np.array([
-        [ 0,    -v[2],  v[1]],
-        [ v[2],  0,    -v[0]],
-        [-v[1],  v[0],  0   ],
-    ])
 
 def plot_overlap(episodes: list[EpisodeData], episode_n: list):
 
@@ -115,19 +94,6 @@ def plot_overlap(episodes: list[EpisodeData], episode_n: list):
         ax[1, 1].set_ylabel("Force Norm (m)")
         ax[1, 1].set_title("Estimated Forces Norm")
         ax[1, 1].legend()
-
-        angles = R.from_quat(episode.states[range_,-4:]).as_euler('xyz', degrees=True)
-        print("Average angle (xyz): ", np.mean(angles, axis=0))
-
-        force_start = np.mean(episode.wrenches[:25, :3], axis=0)
-        force_drift.append(np.linalg.norm(force_start))
-        print("Force start: ", np.linalg.norm(force_start))
-
-    _, axis = plt.subplots()
-    axis.plot(episode_n, force_drift, 'bo')
-    axis.set_xlabel("iter")
-    axis.set_ylabel("Force (N)")
-    axis.set_title("Average Force Norm at rest to detect drift")
 
 def plot_single(episode: EpisodeData, index=0):
     times = episode.times - episode.times[0]
@@ -185,72 +151,6 @@ def plot_single(episode: EpisodeData, index=0):
     fig.tight_layout()
     fig.savefig("results.png", dpi=1200)
 
-# def compute_force_james(episode: EpisodeData):
-
-#     # Preprocess force
-#     force_tool = preprocess_force(episode, world=False)
-#     tau_tool = episode.wrenches[:,3:6]
-
-#     # Compute position vector skew matrix
-#     r_skew = skew(r)
-
-#     # Closed form optimal force estimation
-#     A = np.eye(r_skew.shape[0]) + r_skew.T @ r_skew
-#     B = force_tool + tau_tool @ r_skew
-#     F_tip_est_tool = B @ np.linalg.inv(A).T
-
-#     quat = episode.states[:,-4:]
-#     F_tip_est_world = world2tool(F_tip_est_tool, quat, inverse=True)
-
-#     return F_tip_est_world
-
-def compute_force(episode: EpisodeData):
-    force_world = preprocess_force(episode)
-    quat = episode.states[:,-4:]
-    force_tool = world2tool(force_world, quat)
-    tau_tool = episode.wrenches[:,3:6]
-    
-    
-    # Compute torque from force
-    l = 0.104
-    r_tool = np.array([0.0, -l, 0.0])
-    r_tool = np.broadcast_to(r_tool, force_tool.shape)
-    # tau_tool_pred = np.cross(r_tool, force_tool)
-
-    # Compute force from torque (assuming direction)
-    force_unit = force_tool / np.linalg.norm(force_tool, axis=1).reshape(-1, 1)
-    v = np.cross(r_tool, force_unit)
-    lambda_ = np.abs(np.vecdot(tau_tool, v)) / np.vecdot(v, v)
-    force_pred = lambda_[:, np.newaxis] * force_unit
-
-
-    return world2tool(force_pred, quat, inverse=True), force_world
-
-
-
-
-def preprocess_force(episode: EpisodeData, world=True):
-
-    force_sensor = episode.wrenches[:,:3]
-    quat = episode.states[:, -4:]
-
-
-    force_tool = gravity_compensation(force_sensor, quat, Mass)
-
-    if not world:
-        return force_tool
-
-    force_world = world2tool(force_tool, quat, inverse=True)
-
-    return force_world
-
-def compute_zft(position, force):
-
-    K = 150 * np.eye(3)
-    zft = force @ np.linalg.inv(K).transpose() + position
-
-    return zft
-
 def plot_episodes(episodes: list[EpisodeData], episode_n, overlap: bool = False):
     if not overlap:
         for episode, n in zip(episodes, episode_n):
@@ -265,8 +165,9 @@ def plot_episodes_cal(episodes: list[EpisodeData], episode_n, overlap: bool = Fa
     fig, ax = plt.subplots(2, 3, figsize=(12, 6), sharex=True)
 
     for episode, n in zip(episodes, episode_n):
-        episode.wrenches[:,:3] *= np.array([-1, -1, -1])
-        plot_episode_cal(episode, index=n, ax=ax)
+        episode_copy = copy.copy(episode)
+        episode_copy.wrenches[:,:3] *= np.array([-1, -1, -1])
+        plot_episode_cal(episode_copy, index=n, ax=ax)
 
     for a in ax.ravel():
         a.legend()
@@ -274,64 +175,3 @@ def plot_episodes_cal(episodes: list[EpisodeData], episode_n, overlap: bool = Fa
     fig.suptitle("Calibration: Raw vs Gravity-Compensated Force (overlapped trials)", y=1.02)
     plt.tight_layout()
     plt.show()
-
-def sensor2tool(sensor):
-    perm = [0, 1, 2] # Aligned
-    sign = [-1, -1, 1]
-    tool = sensor[:, perm] * sign
-    assert(sensor.all() == tool.all())
-    return tool
-
-def world2tool(world, quat, inverse=False):
-    """
-    - world: force in world frame
-    - quat: quaterion of transformation from world to tool
-    - inverse: compute rotation from tool to world if True
-    """
-    rot = R.from_quat(quat)
-    tool = rot.apply(world, inverse=inverse)
-    return tool
-
-def gravity_compensation(force_tool, q, m, torque=False):
-    g0 = world2tool(G_WORLD, q0, inverse=False)
-    gi = world2tool(G_WORLD, q, inverse=False)
-
-    F_g = m * (gi - g0)
-    F = force_tool - F_g
-    return F
-
-def main():
-    parser = argparse.ArgumentParser(description="Analyze episode data.")
-    parser.add_argument("dataset_name", type=str, help="Dataset name (e.g. metal, sponge, vial)")
-    parser.add_argument("episode_n", type=int, nargs="+", help="Episode index/indices (e.g. 20 or 1 2 3)")
-    parser.add_argument("--overlap", action="store_true", help="Enable overlap plotting")
-    args = parser.parse_args()
-
-    dataset_name = args.dataset_name
-    episode_n = args.episode_n
-    overlap = args.overlap
-
-    # For metal these indicies are failed [11, 12, 13, 14, 18, 19, 20, 25, 26, 29]
-    # For sponge these indicies are failed [0, 2, 5, 6, 8, 10, 14, 17, 22, 27, 28, 29]
-
-    episodes = extract_episode(dataset_name, episode_n)
-
-    if episodes is None:
-        print("Episode extraction: Something went wrong")
-        return
-
-    # Normalize to list so plotting logic is uniform
-    if isinstance(episodes, EpisodeData):
-        episodes = [episodes]
-        episode_n = [episode_n]
-
-    if dataset_name == "calibration":
-        plot_episodes_cal(episodes, episode_n, overlap=overlap)
-
-    else:
-        plot_episodes(episodes ,episode_n, overlap=overlap)
-    
-
-
-if __name__ == "__main__":
-    main()
