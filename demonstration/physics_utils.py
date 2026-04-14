@@ -3,10 +3,16 @@ from scipy.spatial.transform import Rotation as R
 
 from unpack_data.victor_io_zarr import EpisodeData
 
-Mass = 0.0312 # kg
-G_WORLD = np.array([0.0, 0.0, -9.81])
-q0 = np.array([-0.37382076, 0.03296935, -0.02435134, -0.92659488])
-r = np.array([0.0, -0.104, 0.002325]) # vector from sensor origin to spatula tip 
+# Physical parameters
+MASS_KG = 0.0312  # Tool mass in kg
+G_WORLD = np.array([0.0, 0.0, -9.81])  # Gravitational acceleration
+Q0_REF = np.array([-0.37382076, 0.03296935, -0.02435134, -0.92659488]) # Reference quaternion
+P_SENSOR_TO_TIP = np.array([0.0, -0.104, 0.002325]) # Sensor origin to spatula tip (m)
+
+# Force estimation parameters
+STIFFNESS_MATRIX = 150 * np.eye(3)  # ZFT stiffness (N/m)
+CONTACT_HEIGHT_THRESHOLD = 0.045  # Height threshold for contact (m)
+CONTACT_HEIGHT_THRESHOLD_TIGHT = 0.04  # Tighter threshold (m)
 
 def skew(v: np.ndarray) -> np.ndarray:
     """Skew-symmetric matrix [v]x such that [v]x u = v [cross] u."""
@@ -25,17 +31,33 @@ def sensor2tool(sensor):
 
 def world2tool(world, quat, inverse=False):
     """
-    - world: force in world frame
-    - quat: quaterion of transformation from world to tool
-    - inverse: compute rotation from tool to world if True
+    Rotate force vector between world and tool frames.
+    
+    Parameters
+    ----------
+    world : np.ndarray
+        Force in world frame, shape (3,) or (N, 3).
+    quat : np.ndarray
+        Quaternion [x, y, z, w], shape (4,) or (N, 4).
+    inverse : bool, optional
+        If True, rotate from tool to world. Default is False (world to tool).
+    
+    Returns
+    -------
+    np.ndarray
+        Rotated force, same shape as input.
+    
+    Notes
+    -----
+    Quaternion convention: [x, y, z, w] (scalar last).
     """
     rot = R.from_quat(quat)
     tool = rot.apply(world, inverse=inverse)
     return tool
 
-def gravity_compensation(force_tool, q, m, torque=False):
-    g0 = world2tool(G_WORLD, q0, inverse=False)
-    gi = world2tool(G_WORLD, q, inverse=False)
+def gravity_compensation(force_tool, q, m=MASS_KG, torque=False):
+    g0 = world2tool(G_WORLD, Q0_REF, inverse=False)
+    gi = world2tool(G_WORLD, Q0_REF, inverse=False)
 
     F_g = m * (gi - g0)
     F = force_tool - F_g
@@ -47,7 +69,7 @@ def preprocess_force(episode: EpisodeData, world=True):
     quat = episode.states[:, -4:]
 
 
-    force_tool = gravity_compensation(force_sensor, quat, Mass)
+    force_tool = gravity_compensation(force_sensor, quat)
 
     if not world:
         return force_tool
@@ -85,7 +107,7 @@ def compute_force_james(episode: EpisodeData):
     tau_tool = episode.wrenches[:,3:6]
 
     # Compute position vector skew matrix
-    r_skew = skew(r)
+    r_skew = skew(P_SENSOR_TO_TIP)
 
     # Closed form optimal force estimation
     A = np.eye(r_skew.shape[0]) + r_skew.T @ r_skew
@@ -98,7 +120,26 @@ def compute_force_james(episode: EpisodeData):
     return F_tip_est_world
 
 def compute_zft(position, force, K=150*np.eye(3)):
-
+    """
+    Compute Zero-Force Trajectory (ZFT) from position and estimated force.
+    
+    The ZFT represents the spatial location where force would be zero,
+    computed from a linear spring model: F = K(z - position).
+    
+    Parameters
+    ----------
+    position : np.ndarray
+        Spatial position, shape (N, 3).
+    force : np.ndarray
+        Estimated force, shape (N, 3).
+    K : np.ndarray, optional
+        Diagonal stiffness matrix, shape (3, 3). Default is 150*I.
+    
+    Returns
+    -------
+    np.ndarray
+        Zero-force trajectory, shape (N, 3).
+    """
     zft = force @ np.linalg.inv(K).transpose() + position
 
     return zft

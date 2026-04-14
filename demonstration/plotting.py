@@ -4,7 +4,7 @@ import copy
 
 from unpack_data.victor_io_zarr import EpisodeData
 
-from physics_utils import Mass, gravity_compensation, compute_force, compute_zft, get_contact_idx_with_height
+from physics_utils import MASS_KG, gravity_compensation, compute_force, compute_zft, get_contact_idx_with_height
 
 def plot_episode_cal(episode: EpisodeData, index: int = 0, ax=None):
     times = episode.times - episode.times[0]
@@ -14,7 +14,7 @@ def plot_episode_cal(episode: EpisodeData, index: int = 0, ax=None):
 
     # Gravity-compensated force in tool frame
     quat = episode.states[:, -4:]
-    force_gc = gravity_compensation(force_raw, quat, Mass)
+    force_gc = gravity_compensation(force_raw, quat, MASS_KG)
 
     created_fig = False
     if ax is None:
@@ -165,7 +165,7 @@ def plot_episodes_cal(episodes: list[EpisodeData], episode_n, overlap: bool = Fa
     fig, ax = plt.subplots(2, 3, figsize=(12, 6), sharex=True)
 
     for episode, n in zip(episodes, episode_n):
-        episode_copy = copy.copy(episode)
+        episode_copy = copy.deepcopy(episode)
         episode_copy.wrenches[:,:3] *= np.array([-1, -1, -1])
         plot_episode_cal(episode_copy, index=n, ax=ax)
 
