@@ -171,43 +171,20 @@ def compute_force(episode: EpisodeData):
 
     return world2tool(force_pred, quat, inverse=True), force_world
 
-# ...existing code...
 
-def plot_force_fft(force: np.ndarray, times: np.ndarray | None = None, remove_dc: bool = True, max_freq: float | None = None):
 
-    n = force.shape[0]
-    dt = np.mean(np.diff(times))
 
-    sig = force.copy()
-    if remove_dc:
-        sig = sig - np.mean(sig, axis=0, keepdims=True)
-
-    freqs = np.fft.rfftfreq(n, d=dt)
-    fft_mag = np.abs(np.fft.rfft(sig, axis=0)) / n
-
-    fig, ax = plt.subplots(3, 1, figsize=(10, 7), sharex=True)
-    labels = ["Fx", "Fy", "Fz"]
-    for i in range(3):
-        ax[i].plot(freqs, fft_mag[:, i], label=labels[i])
-        ax[i].set_ylabel("|FFT|")
-        ax[i].legend()
-        ax[i].grid(True, alpha=0.3)
-
-    ax[-1].set_xlabel("Frequency [Hz]")
-    if max_freq is not None:
-        ax[-1].set_xlim(0, max_freq)
-    fig.suptitle("Force FFT (frequency domain)")
-    plt.tight_layout()
-    plt.show()
-
-# ...existing code...
-
-def preprocess_force(episode: EpisodeData):
+def preprocess_force(episode: EpisodeData, world=True):
 
     force_sensor = episode.wrenches[:,:3]
     quat = episode.states[:, -4:]
 
-    force_tool = gravity_compensation(force_sensor, quat, Mass, )
+
+    force_tool = gravity_compensation(force_sensor, quat, Mass)
+
+    if not world:
+        return force_tool
+
     force_world = world2tool(force_tool, quat, inverse=True)
 
     return force_world
@@ -225,13 +202,27 @@ def plot_episodes(episodes: list[EpisodeData], episode_n, overlap: bool = False)
             plot_single(episode, index=n)
 
     else:
-        plot_overlap(episodes)
+        plot_overlap(episodes, episode_n)
     
+    plt.show()
+
+def plot_episodes_cal(episodes: list[EpisodeData], episode_n, overlap: bool = False):
+    fig, ax = plt.subplots(2, 3, figsize=(12, 6), sharex=True)
+
+    for episode, n in zip(episodes, episode_n):
+        episode.wrenches[:,:3] *= np.array([-1, -1, -1])
+        plot_episode_cal(episode, index=n, ax=ax)
+
+    for a in ax.ravel():
+        a.legend()
+
+    fig.suptitle("Calibration: Raw vs Gravity-Compensated Force (overlapped trials)", y=1.02)
+    plt.tight_layout()
     plt.show()
 
 def sensor2tool(sensor):
     perm = [0, 1, 2] # Aligned
-    sign = [1, 1, 1]
+    sign = [-1, -1, 1]
     tool = sensor[:, perm] * sign
     assert(sensor.all() == tool.all())
     return tool
@@ -251,8 +242,6 @@ def gravity_compensation(force_tool, q, m, torque=False):
     gi = world2tool(G_WORLD, q, inverse=False)
 
     F_g = m * (gi - g0)
-    print(F_g.shape)
-    print(force_tool.shape)
     F = force_tool - F_g
     return F
 
@@ -272,12 +261,20 @@ def main():
 
     episodes = extract_episode(dataset_name, episode_n)
 
+    if episodes is None:
+        print("Episode extraction: Something went wrong")
+        return
+
     # Normalize to list so plotting logic is uniform
     if isinstance(episodes, EpisodeData):
         episodes = [episodes]
         episode_n = [episode_n]
 
-    plot_episodes(episodes ,episode_n, overlap=overlap)
+    if dataset_name == "calibration":
+        plot_episodes_cal(episodes, episode_n, overlap=overlap)
+
+    else:
+        plot_episodes(episodes ,episode_n, overlap=overlap)
     
 
 
