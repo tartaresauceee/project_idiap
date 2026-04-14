@@ -14,7 +14,7 @@ class ImpedanceSimulator:
         self.t = np.arange(0, duration, dt)
         
         # Impedance parameters
-        self.M = np.array([[0.2, 0], [0, 0.1]])
+        self.M = np.eye(2) * 0.1
         self.K = np.array([[150, 0], [0, 150]])
         self.B = 2 * np.sqrt(np.multiply(self.M, self.K))
         
@@ -24,8 +24,8 @@ class ImpedanceSimulator:
         self.wall_y = 0.0
         
         # Goal trajectory
-        self.x0 = np.array([0.0, 0.05])
-        self.x_goal = np.array([0.0, -0.01])
+        self.x0 = np.array([0.0, 0.02])
+        self.x_goal = np.array([0.0, -0.005])
         
         # Initial conditions
         self.initial_state = np.concatenate([self.x0, np.zeros(2)])
@@ -41,14 +41,8 @@ class ImpedanceSimulator:
         
         if t < 0:
             return self.x0
-        
-        # A = self.x_goal - self.x0
-        # term1 = 10 / self.duration**3 * t**3
-        # term2 = -15 / self.duration**4 * t**4
-        # term3 = 6 / self.duration**5 * t**5
-        
-        # return A * (term1 + term2 + term3)
 
+        # Motion towards surface
         if t <= self.duration/2:
             A = self.x_goal - self.x0
             term1 = 10 / (self.duration/2)**3 * t**3
@@ -57,6 +51,7 @@ class ImpedanceSimulator:
 
             return self.x0 + A * (term1 + term2 + term3)
 
+        # Motion away from surface
         else:
             A = self.x0 - self.x_goal
             term1 = 10 / (self.duration/2)**3 * (t - self.duration/2)**3
@@ -140,31 +135,32 @@ class ImpedanceSimulator:
 
         rmse = np.sqrt(1/len(self.zft[:,1]) * np.sum((self.zft[:,1] - self.zft_hat)**2))
         
-        plt.figure(figsize=(12, 4))
-        plt.subplot(1, 2, 1)
-        plt.plot(self.t, x2, color="blue", label='x2 (actual)')
-        plt.plot(self.t, self.zft[:, 1], color='orange', label='x2 (zft)')
-        plt.plot(self.t, self.zft_hat, color='cyan', label=f'reconstructed zft (RMSE: {rmse:.4f}m)')
-        plt.hlines(self.wall_y, 0, self.t[-1], colors='black', label='wall', linestyles='--')
-        plt.legend()
-        plt.xlabel('Time (s)')
-        plt.ylabel('Position (m)')
-        plt.grid(True, alpha=0.3)
-
-        plt.subplot(1, 2, 2)
-        plt.plot(self.t, self.wall_force_hist[:,1], color="red",label='Vertical wall force')
-        plt.legend()
-        plt.xlabel('Time (s)')
-        plt.ylabel('Force (N)')
-        plt.grid(True, alpha=0.3)
+        fig, ax = plt.subplots(2, 1, figsize=(8,6), sharex=True)
         
-        plt.tight_layout()
+        # Left y-axis: Position
+        ax[0].plot(self.t, x2*1e3, color="blue", label='Y (actual)')
+        ax[0].plot(self.t, self.zft[:, 1]*1e3, color='orange', label='Y (ZFT)')
+        ax[0].plot(self.t, self.zft_hat*1e3, color='cyan', label=f'Reconstructed ZFT') #  (RMSE: {rmse:.4f}m)
+        ax[0].hlines(self.wall_y, 0, self.t[-1], colors='black', label='Wall', linestyles='--')
+        ax[0].set_ylabel('Position (mm)', color='blue', size='large')
+        ax[0].grid(True, alpha=0.3)
+        ax[0].legend(loc='lower right')
+        
+        # Right y-axis: Force
+
+        ax[1].plot(self.t, self.wall_force_hist[:,1], color="red", label='Vertical wall force')
+        ax[1].set_xlabel('Time (s)', size='large')
+        ax[1].set_ylabel('Force (N)', color='red', size='large')
+        ax[1].legend(loc='upper right')
+
+        fig.suptitle("Substractive Impedance", size='x-large')
+        fig.tight_layout()
         plt.show()
 
 
 if __name__ == "__main__":
     # Create simulator with custom parameters
-    sim = ImpedanceSimulator(duration=2.0, dt=1e-3)
+    sim = ImpedanceSimulator(duration=5.0, dt=1e-3)
     
     # Run simulation
     sim.simulate("RK45")
