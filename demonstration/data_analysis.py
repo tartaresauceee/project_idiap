@@ -9,30 +9,48 @@ from scipy.spatial.transform import Rotation as R
 Mass = 0.0312 # kg
 G_WORLD = np.array([0.0, 0.0, -9.81])
 q0 = np.array([-0.37382076, 0.03296935, -0.02435134, -0.92659488])
+r = np.array([0.0, -0.104, 0.002325]) # vector from sensor origin to spatula tip 
 
-def get_contact_time(episode: EpisodeData, baseline_samples=50, drift_factor=0.5, threshold_factor=5.0):
-    """Detect contact time using CUSUM on torque Tx."""
-    torque = episode.wrenches[:, 3]
-    times = episode.times
+force_drift = []
 
-    # Estimate baseline from first samples (assumed non-contact)
-    baseline = torque[:baseline_samples]
-    mu0 = np.mean(baseline)
-    sigma = np.std(baseline)
+def plot_episode_cal(episode: EpisodeData, index: int = 0, ax=None):
+    times = episode.times - episode.times[0]
 
-    drift = drift_factor * sigma
-    threshold = threshold_factor * sigma
+    # Raw force from sensor (Fx, Fy, Fz)
+    force_raw = episode.wrenches[:, :3]
 
-    # Two-sided CUSUM
-    s_pos = 0.0
-    s_neg = 0.0
-    for i in range(1, len(torque)):
-        s_pos = max(0.0, s_pos + (torque[i] - mu0) - drift)
-        s_neg = max(0.0, s_neg - (torque[i] - mu0) - drift)
-        if s_pos > threshold or s_neg > threshold:
-            return i, times[i]
+    # Gravity-compensated force in tool frame
+    quat = episode.states[:, -4:]
+    force_gc = gravity_compensation(force_raw, quat, Mass)
 
-    return -1, None
+    created_fig = False
+    if ax is None:
+        fig, ax = plt.subplots(2, 3, figsize=(12, 6), sharex=True)
+        created_fig = True
+
+    axes_labels = ["Fx", "Fy", "Fz"]
+
+    # Top row: raw force (overlap episodes)
+    for i in range(3):
+        ax[0, i].plot(times, force_raw[:, i], label=f"ep {index}")
+        ax[0, i].set_title(f"{axes_labels[i]} raw")
+        ax[0, i].set_ylabel("Force (N)")
+        ax[0, i].grid(True, alpha=0.3)
+
+    # Bottom row: gravity-compensated force (overlap episodes)
+    for i in range(3):
+        ax[1, i].plot(times, force_gc[:, i], label=f"ep {index}")
+        ax[1, i].set_title(f"{axes_labels[i]} gravity compensated")
+        ax[1, i].set_xlabel("Time (s)")
+        ax[1, i].set_ylabel("Force (N)")
+        ax[1, i].grid(True, alpha=0.3)
+
+    if created_fig:
+        for a in ax.ravel():
+            a.legend()
+        fig.suptitle(f"Calibration Episode {index}: Raw vs Gravity-Compensated Force", y=1.02)
+        plt.tight_layout()
+
 
 def get_contact_idx_with_height(height: np.ndarray, thresh: float):
     idx = np.where(height < thresh)[0]
@@ -40,18 +58,27 @@ def get_contact_idx_with_height(height: np.ndarray, thresh: float):
 
     return first_idx
 
-def plot_overlap(episodes: EpisodeData):
+def skew(v: np.ndarray) -> np.ndarray:
+    """Skew-symmetric matrix [v]x such that [v]x u = v [cross] u."""
+    return np.array([
+        [ 0,    -v[2],  v[1]],
+        [ v[2],  0,    -v[0]],
+        [-v[1],  v[0],  0   ],
+    ])
+
+def plot_overlap(episodes: list[EpisodeData], episode_n: list):
 
     fig, ax = plt.subplots(2, 2, figsize=(10,5))
 
-    for episode in episodes:
+    for episode, n in zip(episodes, episode_n):
+        print(n)
 
-        contact_idx = get_contact_idx_with_height(episode.states[:,2], thresh=0.04)
+        contact_idx = get_contact_idx_with_height(episode.states[:,2], thresh=0.045)
         if contact_idx is None:
             print("No contact detected")
-            return
-        
-        range_ = range(contact_idx-50, contact_idx+300)
+            range_ = range(len(episode.times))
+        else:
+            range_ = range(contact_idx-50, contact_idx+300)
 
         times = episode.times
         times = (times - times[0])[range_]
@@ -60,26 +87,54 @@ def plot_overlap(episodes: EpisodeData):
 
         zft = compute_zft(episode.states[:,:3], -f_world_tau)
 
-        ax[0, 0].plot(times, episode.states[range_,2], label='Z')
-        ax[0, 0].plot(times, zft[range_,2], label='ZFT')
+        line_pos = ax[0, 0].plot(times, episode.states[range_,2], label='Z')
+        ax[0, 0].plot(times, zft[range_,2], label='ZFT', linestyle='--', color=line_pos[0].get_color())
+        ax[0, 0].set_xlabel("time (s)")
+        ax[0, 0].set_ylabel("Z position (m)")
+        ax[0, 0].set_title("Vertical Position VS Estimated ZFT")
         ax[0, 0].legend()
 
-        ax[0, 1].plot(times, f_world_tau[range_,2], label='Fz (from moment)')
-        ax[0, 1].plot(times, f_world_f[range_,2], label='Fz (from force)')
+        line_F = ax[0, 1].plot(times, f_world_tau[range_,2], label='Fz (from moment)')
+        ax[0, 1].plot(times, f_world_f[range_,2], label='Fz (from force)', linestyle='--', color=line_F[0].get_color())
+        ax[0, 1].set_xlabel("time (s)")
+        ax[0, 1].set_ylabel("Z force (N)")
+        ax[0, 1].set_title("Estimated Vertical Forces")
         ax[0, 1].legend()
 
-        ax[1, 0].plot(times, np.linalg.norm(episode.wrenches[range_,3:6], axis=1), label='|Moment|')
-        ax[1, 0].plot(times, np.linalg.norm(episode.wrenches[range_,:3], axis=1), label='|Force|')
+        lines_Fmag = ax[1, 0].plot(times, np.linalg.norm(episode.wrenches[range_,3:6], axis=1), label='|Moment|')
+        ax[1, 0].plot(times, np.linalg.norm(f_world_f[range_,:3], axis=1), label='|Force|', linestyle='--', color=lines_Fmag[0].get_color())
         ax[1, 0].legend()
+        ax[1, 0].set_xlabel("time (s)")
+        ax[1, 0].set_ylabel("Force Norm (N)")
+        ax[1, 0].set_title("Sensor Wrench Norm")
 
         ax[1, 1].plot(times, np.linalg.norm(f_world_tau[range_], axis=1), label='|F| from torque')
         ax[1, 1].plot(times, np.linalg.norm(f_world_f[range_], axis=1), label='|F| from force')
         ax[1, 1].legend()
+        ax[1, 1].set_xlabel("time (s)")
+        ax[1, 1].set_ylabel("Force Norm (m)")
+        ax[1, 1].set_title("Estimated Forces Norm")
+        ax[1, 1].legend()
+
+        angles = R.from_quat(episode.states[range_,-4:]).as_euler('xyz', degrees=True)
+        print("Average angle (xyz): ", np.mean(angles, axis=0))
+
+        force_start = np.mean(episode.wrenches[:25, :3], axis=0)
+        force_drift.append(np.linalg.norm(force_start))
+        print("Force start: ", np.linalg.norm(force_start))
+
+    _, axis = plt.subplots()
+    axis.plot(episode_n, force_drift, 'bo')
+    axis.set_xlabel("iter")
+    axis.set_ylabel("Force (N)")
+    axis.set_title("Average Force Norm at rest to detect drift")
 
 def plot_single(episode: EpisodeData, index=0):
     times = episode.times - episode.times[0]
 
     f_world_tau, f_world_f = compute_force(episode)
+    # f_world_james = compute_force_james(episode)
+    # f_world_james_open = compute_force_james_open(episode)
 
     zft = compute_zft(episode.states[:,:3], -f_world_tau)
 
