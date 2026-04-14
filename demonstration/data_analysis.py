@@ -83,23 +83,42 @@ def plot_single(episode: EpisodeData, index=0):
 
     zft = compute_zft(episode.states[:,:3], -f_world_tau)
 
-    fig, ax = plt.subplots(2, 2, figsize=(10,5))
+    fig, ax = plt.subplots(2, 2, figsize=(10,5), sharex=True)
 
     ax[0, 0].plot(times, episode.states[:,2], label='Z')
     ax[0, 0].plot(times, zft[:,2], label='ZFT')
-    ax[0, 0].legend()
+    ax[0, 0].set_xlabel("time (s)")
+    ax[0, 0].set_ylabel("Z-axis position (m)")
+    ax[0, 0].set_title("Vertical Position VS Estimated ZFT")
+    ax[0, 0].legend(loc='upper right')
 
-    ax[0, 1].plot(times, f_world_tau[:,2], label='Fz (from moment)')
-    ax[0, 1].plot(times, f_world_f[:,2], label='Fz (from force)')
-    ax[0, 1].legend()
+    ax[0, 1].plot(times, f_world_tau[:,2], label='Fz')
+    # OLD
+    # ax[0, 1].plot(times, f_world_tau[:,2], label='Fz (tau est)')
+    # ax[0, 1].plot(times, f_world_f[:,2], label='Fz (raw force)')
+    # #ax[0, 1].plot(times, f_world_james[:,2], label='Fz (james est)')
+    # ax[0, 1].plot(times, f_world_james_open[:,2], label='Fz (james est open)')
+    ax[0, 1].set_xlabel("time (s)")
+    ax[0, 1].set_ylabel("Z-axis force (N)")
+    ax[0, 1].set_title("Estimated Vertical Force")
+    ax[0, 1].legend(loc='upper right')
 
-    ax[1, 0].plot(times, np.linalg.norm(episode.wrenches[:,3:6], axis=1), label='|Moment|')
-    ax[1, 0].plot(times, np.linalg.norm(episode.wrenches[:,:3], axis=1), label='|Force|')
-    ax[1, 0].legend()
+    ax[1, 0].plot(times, np.linalg.norm(episode.wrenches[:,3:6], axis=1), label='|t|')
+    ax[1, 0].plot(times, np.linalg.norm(f_world_f, axis=1), label='|F|')
+    ax[1, 0].set_xlabel("time (s)")
+    ax[1, 0].set_ylabel("Magnitude (N & Nm)")
+    ax[1, 0].set_title("Raw Wrench")
+    ax[1, 0].legend(loc='upper right')
 
-    ax[1, 1].plot(times, np.linalg.norm(f_world_tau, axis=1), label='|F| from torque')
-    ax[1, 1].plot(times, np.linalg.norm(f_world_f, axis=1), label='|F| from force')
-    ax[1, 1].legend()
+    ax[1, 1].plot(times, np.linalg.norm(f_world_tau, axis=1), label='|F|')
+    # OLD
+    # ax[1, 1].plot(times, np.linalg.norm(f_world_tau, axis=1), label='|F| tau est')
+    # ax[1, 1].plot(times, np.linalg.norm(f_world_f, axis=1), label='|F| raw force')
+    # ax[1, 1].plot(times, np.linalg.norm(f_world_james, axis=1), label='|F| james est')
+    ax[1, 1].set_xlabel("time (s)")
+    ax[1, 1].set_ylabel("Magnitude (N)")
+    ax[1, 1].set_title("Estimated Force Magnitude")
+    ax[1, 1].legend(loc='upper right')
 
     contact_idx = get_contact_idx_with_height(episode.states[:,2], thresh=0.04)
 
@@ -107,6 +126,28 @@ def plot_single(episode: EpisodeData, index=0):
         t_contact = times[contact_idx]
         for a in ax.ravel():
             a.axvline(x=t_contact, linestyle='--', color='red', linewidth=1.5)
+
+    fig.tight_layout()
+    fig.savefig("results.png", dpi=1200)
+
+# def compute_force_james(episode: EpisodeData):
+
+#     # Preprocess force
+#     force_tool = preprocess_force(episode, world=False)
+#     tau_tool = episode.wrenches[:,3:6]
+
+#     # Compute position vector skew matrix
+#     r_skew = skew(r)
+
+#     # Closed form optimal force estimation
+#     A = np.eye(r_skew.shape[0]) + r_skew.T @ r_skew
+#     B = force_tool + tau_tool @ r_skew
+#     F_tip_est_tool = B @ np.linalg.inv(A).T
+
+#     quat = episode.states[:,-4:]
+#     F_tip_est_world = world2tool(F_tip_est_tool, quat, inverse=True)
+
+#     return F_tip_est_world
 
 def compute_force(episode: EpisodeData):
     force_world = preprocess_force(episode)
