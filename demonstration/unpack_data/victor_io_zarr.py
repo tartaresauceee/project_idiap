@@ -388,6 +388,8 @@ def inverse_compute(episode: EpisodeData, K):
 def extract_episode(dataset_name, episode_n: int | list):
     if dataset_name == "calibration":
         zarr_root = Path(r"C:\Users\Victo\OneDrive\Documents\EPFL\Cours\MA4\semester_proj_idiap\code\demonstration\victor_data\victor_calibration_2026-03-04-10-08\data.zarr")
+    elif dataset_name == "calibration_2":
+        zarr_root = Path(r"C:\Users\Victo\OneDrive\Documents\EPFL\Cours\MA4\semester_proj_idiap\code\demonstration\victor_data\victor_calibration_2026-03-26-09-31\data.zarr")
     elif dataset_name == "metal":
         zarr_root = Path(r"C:\Users\Victo\OneDrive\Documents\EPFL\Cours\MA4\semester_proj_idiap\code\demonstration\victor_data\victor_metal_2026-03-04-10-13\data.zarr")
     elif dataset_name == "vial":
@@ -424,6 +426,8 @@ def main():
 
     if data == "calibration":
         zarr_root = Path(r"C:\Users\Victo\OneDrive\Documents\EPFL\Cours\MA4\semester_proj_idiap\code\demonstration\victor_data\victor_calibration_2026-03-04-10-08\data.zarr")
+    elif data == "calibration2":
+        zarr_root = Path(r"C:\Users\Victo\OneDrive\Documents\EPFL\Cours\MA4\semester_proj_idiap\code\demonstration\victor_data\victor_calibration_2026-03-26-11-36")
     elif data == "metal":
         zarr_root = Path(r"C:\Users\Victo\OneDrive\Documents\EPFL\Cours\MA4\semester_proj_idiap\code\demonstration\victor_data\victor_metal_2026-03-04-10-13\data.zarr")
     elif data == "vial":
@@ -435,37 +439,47 @@ def main():
         return
 
     target_hz = 100.0
-    lowpass_cutoff = None #10.0
+    lowpass_cutoff_pos = 10.0
+    lowpass_cutoff_wrench = 5.0
     butter_order = 2
 
     episode = import_data(
         zarr_root=zarr_root,
         target_hz=target_hz,
-        lowpass_cutoff=lowpass_cutoff,
+        lowpass_cutoff_pos=lowpass_cutoff_pos,
+        lowpass_cutoff_wrench=lowpass_cutoff_wrench,
         butter_order=butter_order,
     )
 
-    episodes = split_episodes(episode)
-
-    episode = episodes[6]
-
-    K_list = np.linspace(100, 500, 9).tolist()
-    zft_list = []
-
-    for K in K_list:
-        zft_list.append(inverse_compute(episode, K))
+    print(
+        "Loaded episode data:",
+        f"states={episode.states.shape}",
+        f"wrenches={episode.wrenches.shape}",
+        f"times={episode.times.shape}",
+        f"episode_ends={episode.episode_ends.shape}",
+    )
 
     times = episode.times
 
-    fig, ax = plt.subplots(3, 3, sharex=True, sharey=True, figsize=(15, 15))
-    for i, K in enumerate(K_list):
-        r, c = divmod(i, 3)
-        ax[r, c].plot(times, episode.states[:, 2], label="z")
-        ax[r, c].plot(times, zft_list[i], label=f"zft K={K:.1f}")
-        ax[r, c].set_ylabel("z")
-        ax[r, c].set_xlabel("time [s]")
-        ax[r, c].legend()
+    fig, ax = plt.subplots(3, 1, sharex=True, figsize=(10, 8))
+    ax[0].plot(times, episode.states[:, 0], label="x")
+    ax[0].set_ylabel("x")
+    ax[1].plot(times, episode.states[:, 1], label="y")
+    ax[1].set_ylabel("y")
+    ax[2].plot(times, episode.states[:, 2], label="z")
+    ax[2].set_ylabel("z")
+    ax[2].set_xlabel("time [s]")
     fig.suptitle("Position vs Time")
+    fig.tight_layout()
+
+    fig2, ax2 = plt.subplots(2, 1, sharex=True, figsize=(10, 6))
+    ax2[0].plot(times, episode.wrenches[:, 2], label="force_z")
+    ax2[0].set_ylabel("force z")
+    ax2[1].plot(times, episode.wrenches[:, 5], label="torque_z")
+    ax2[1].set_ylabel("torque z")
+    ax2[1].set_xlabel("time [s]")
+    fig2.suptitle("Wrench Z vs Time")
+    fig2.tight_layout()
 
     plt.show()
 
