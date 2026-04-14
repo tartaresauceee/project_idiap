@@ -6,7 +6,7 @@ import argparse
 from unpack_data.victor_io_zarr import extract_episode, EpisodeData
 from scipy.spatial.transform import Rotation as R
 
-Mass = 0.0042 # kg
+Mass = 0.0312 # kg
 G_WORLD = np.array([0.0, 0.0, -9.81])
 q0 = np.array([-0.37382076, 0.03296935, -0.02435134, -0.92659488])
 
